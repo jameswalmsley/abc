@@ -6,6 +6,7 @@ from distutils import util
 
 include_dirs = [
     '../aig/hop',
+    '../aig/gia',
     '../base/abc',
     '../base/cmd',
     '../base/io',
@@ -18,6 +19,7 @@ include_dirs = [
     '../misc/st',
     '../misc/util',
     '../misc/vec',
+    '../misc/hash',
     ]
     
 define_macros = []
@@ -60,5 +62,5 @@ setup(
     name='pyabc',
     version='1.0',
     ext_modules=[ext],
-    py_modules=['pyabc']
+    py_modules=['pyabc','getch','pyabc_split','redirect']
 )
