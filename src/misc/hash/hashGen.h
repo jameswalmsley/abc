@@ -54,8 +54,9 @@ struct Hash_Gen_t_
 {
   int                             nSize;
   int                             nBins;
-  int (* fHash)(void * key, int nBins);
-  int (* fComp)(void * key, void * key);
+  int (* fHash)(void *key, int nBins);
+  int (* fComp)(void *key, void *data);
+  int                             fFreeKey;
   Hash_Gen_Entry_t **            pArray;
 };
 
@@ -86,12 +87,50 @@ struct Hash_Gen_t_
 ***********************************************************************/
 static int Hash_DefaultHashFuncStr( void * key, int nBins )
 {
-    int i, Value = 0;
-    if ( key[0] == 0 )
-        return 0;
-    for ( i = strlen(key)-1; i >= 0; i-- )
-        Value = 5 * Value + key[i];
-    return Value % nBins;
+    char* p = (const char*)key;
+    int h=0;
+
+    for( ; *p ; ++p )
+        h += h*5 + *p;
+  
+    return (unsigned)h % nBins; 
+}
+
+static int Hash_DefaultCmpFuncStr( void * key1, void * key2 )
+{
+    return strcmp((const char*)key1, (const char*) key2);
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Default hash function for (long) integers.]
+
+  Description []
+               
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+static int Hash_DefaultHashFuncInt( void * key, int nBins )
+{
+    return (long)key % nBins;
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Default comparison function for (long) integers.]
+
+  Description []
+               
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+static int Hash_DefaultCmpFuncInt( void * key1, void* key2 )
+{
+    return (long)key1 - (long)key2;
 }
 
 /**Function*************************************************************
@@ -107,8 +146,9 @@ static int Hash_DefaultHashFuncStr( void * key, int nBins )
 ***********************************************************************/
 static inline Hash_Gen_t * Hash_GenAlloc( 
   int nBins, 
-  int (*Hash_FuncHash)(void *, int), 
-  int (*Hash_FuncComp)(void *, void *) )
+  int (*Hash_FuncHash)(void *, int),
+  int (*Hash_FuncComp)(void *, void *),
+  int fFreeKey)
 {
   Hash_Gen_t * p;
   int i;
@@ -116,7 +156,8 @@ static inline Hash_Gen_t * Hash_GenAlloc(
   p = ABC_CALLOC( Hash_Gen_t, 1 );
   p->nBins  = nBins;
   p->fHash  = Hash_FuncHash? Hash_FuncHash : (int (*)(void *, int))Hash_DefaultHashFuncStr;
-  p->fComp  = Hash_FuncComp? Hash_FuncComp : (int (*)(void *, void *))strcmp;
+  p->fComp  = Hash_FuncComp? Hash_FuncComp : (int (*)(void *, void *))Hash_DefaultCmpFuncStr;
+  p->fFreeKey = fFreeKey;
   p->nSize  = 0;
   p->pArray = ABC_CALLOC( Hash_Gen_Entry_t *, nBins );
   return p;
@@ -207,7 +248,7 @@ static inline void Hash_GenWriteEntry( Hash_Gen_t *p, void * key, void * data )
   SeeAlso     []
 
 ***********************************************************************/
-static inline void * Hash_GenEntry( Hash_Gen_t *p, void * key, int fCreate )
+static inline Hash_Gen_Entry_t * Hash_GenEntry( Hash_Gen_t *p, void * key, int fCreate )
 {
   int bin;
   Hash_Gen_Entry_t *pEntry, **pLast;
@@ -220,7 +261,7 @@ static inline void * Hash_GenEntry( Hash_Gen_t *p, void * key, int fCreate )
   pEntry = p->pArray[bin];
   while(pEntry) {
     if ( !p->fComp(pEntry->key,key) )
-      return pEntry->data;
+      return pEntry;
     pLast = &(pEntry->pNext);
     pEntry = pEntry->pNext;
   }
@@ -233,51 +274,10 @@ static inline void * Hash_GenEntry( Hash_Gen_t *p, void * key, int fCreate )
     pEntry->pNext = NULL;
     pEntry->key  = key;
     pEntry->data = NULL;
-    return pEntry->data;
+    return pEntry;
   }
 
   return NULL;
-}
-
-
-/**Function*************************************************************
-
-  Synopsis    [Finds or creates an entry with a key and returns the pointer to it.]
-
-  Description []
-               
-  SideEffects []
-
-  SeeAlso     []
-
-***********************************************************************/
-static inline void** Hash_GenEntryPtr( Hash_Gen_t *p, void * key )
-{
-  int bin;
-  Hash_Gen_Entry_t *pEntry, **pLast;
-
-  // find the bin where this key would live
-  bin = (*(p->fHash))(key, p->nBins);
-
-  // search for key
-  pLast = &(p->pArray[bin]);
-  pEntry = p->pArray[bin];
-  while(pEntry) {
-    if ( !p->fComp(pEntry->key,key) )
-      return &(pEntry->data);
-    pLast = &(pEntry->pNext);
-    pEntry = pEntry->pNext;
-  }
-
-  // this key does not currently exist
-  // create a new entry and add to bin
-  p->nSize++;
-  (*pLast) = pEntry = ABC_ALLOC( Hash_Gen_Entry_t, 1 );
-  pEntry->pNext = NULL;
-  pEntry->key  = key;
-  pEntry->data = NULL;
-
-  return &(pEntry->data);
 }
 
 /**Function*************************************************************
@@ -308,6 +308,9 @@ static inline void* Hash_GenRemove( Hash_Gen_t *p, void * key )
       p->nSize--;
       data = pEntry->data;
       *pLast = pEntry->pNext;
+      if (p->fFreeKey)
+        ABC_FREE(pEntry->key);
+      ABC_FREE(pEntry);
       return data;
     }
     pLast = &(pEntry->pNext);
@@ -339,6 +342,8 @@ static inline void Hash_GenFree( Hash_Gen_t *p )
     pEntry = p->pArray[bin];
     while(pEntry) {
       pTemp = pEntry;
+      if( p->fFreeKey )
+        ABC_FREE(pTemp->key);
       pEntry = pEntry->pNext;
       ABC_FREE( pTemp );
     }
